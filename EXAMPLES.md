@@ -1,180 +1,176 @@
-# Hermes Agent 实战案例
+# Hermes Agent 实战案例 / Real-World Examples
 
-## 案例 1: 路径陷阱
+每个案例展示 ❌ 常见错误 vs ✅ 正确做法。
 
-**用户请求**: "帮我把这个文件里的 'foo' 改成 'bar'"
+Each example shows what Hermes commonly does wrong and how to fix it.
 
-**❌ Hermes 常见错误 (MSYS 路径)**
+---
+
+## 1. 路径陷阱 / The Path Trap
+
+**用户**: "帮我把 `config.json` 里的 `foo` 改成 `bar`"
+
+### ❌ Wrong (MSYS path in file tool)
 
 ```bash
-# Hermes 内部用了 MSYS 路径
 patch("/c/Users/yushi/project/config.json", "foo", "bar")
-# → 创建了 C:\c\Users\yushi\project\config.json 这个影子文件
-# → 原文件没改，用户看到的是旧内容
+# → Creates C:\c\Users\yushi\project\config.json
+# → Original file unchanged. User sees old content.
 ```
 
-**✅ 正确做法**
+### ✅ Correct
 
 ```bash
-# 所有文件工具都用 Windows 原生路径
+# File tools → Windows native path
 patch("C:\\Users\\yushi\\project\\config.json", "foo", "bar")
 
-# terminal 内部可以用 MSYS 路径
+# Terminal → MSYS path is fine
 terminal("sed -i 's/foo/bar/g' /c/Users/yushi/project/config.json")
 ```
 
-**关键**: 文件工具 (read_file, write_file, patch, search_files) 永远用 Windows 路径。
-终端 (terminal) 里可以用 MSYS 路径，因为 shell 自己会处理。
+> **Rule**: File tools = Windows paths. Terminal = MSYS paths OK.
 
 ---
 
-## 案例 2: 工具链混淆
+## 2. 工具链混淆 / Toolchain Confusion
 
-**用户请求**: "帮我装个 Python 包，用来处理图片"
+**用户**: "帮我装个 Python 图片处理包"
 
-**❌ 常见错误**
+### ❌ Wrong
 
 ```bash
-pip install pillow
-python3 -c "from PIL import Image..."
-# → pip 可能装到了错误的 Python
-# → python3 不存在
+pip install pillow      # may install to wrong Python
+python3 -c "..."         # python3 doesn't exist on this machine
 ```
 
-**✅ 正确做法**
+### ✅ Correct
 
 ```bash
-# 先确认 Python 环境
-python --version
-uv pip install pillow
+python --version         # check first
+uv pip install pillow    # use uv
 
-# 如果有特定 Python（比如装了 rembg 的那个）
+# For image processing (specific Python with rembg/scipy):
 C:\Users\yushi\AppData\Local\Programs\Python\Python311\python.exe -c "..."
 ```
 
-**关键**: Windows 上 python3 通常是假的。用 `python` 或 `uv`。
+> **Rule**: `python3` is fake on Windows. Use `python` or `uv`.
 
 ---
 
-## 案例 3: 生图工作流
+## 3. 跳过技能系统 / Skipping Skills
 
-**用户请求**: "帮我做一张宣传海报"
+**用户**: "帮我做一张宣传海报"
 
-**❌ 跳过技能，裸调工具**
-
-```
-直接调用 image_generate → 效果一般
-然后手动拼接 → 费时费力
-```
-
-**✅ 先加载技能，再执行**
+### ❌ Wrong
 
 ```
-1. skill_view("image-compositing")  # 加载海报合成技能
-2. skill_view("comfyui")            # 如果有复杂生图需求
-3. 按技能指引逐步执行
-4. 每一步验证输出再继续
+image_generate(prompt="...") → meh result
+manual post-processing → slow and error-prone
 ```
 
-**关键**: Hermes 有 50+ 技能。花 2 秒加载比裸写快 10 倍。
-
----
-
-## 案例 4: npm 发布 2FA
-
-**用户请求**: "帮我把这个包发到 npm"
-
-**❌ 死循环**
+### ✅ Correct
 
 ```bash
-npm publish → EOTP 错误
-npm login --auth-type=web → 超时
-npm publish → EOTP 错误
-# 循环 5 次还是不行
+1. skill_view("image-compositing")  # Load the poster skill
+2. Follow skill's step-by-step pipeline
+3. Verify each step before continuing
+# Result: polished poster in 3 minutes instead of 30
 ```
 
-**✅ 正确流程**
-
-```
-1. 用 PTY 模式启动 npm login
-2. 从 log 里抓取授权链接 (https://www.npmjs.com/auth/cli/<uuid>)
-3. 用 cmd.exe //c start "" "URL" 在桌面浏览器打开
-4. 用户在 Chrome 认证器完成 2FA
-5. 等流程结束，再 npm publish
-```
-
-**关键**: npm 2FA 链接被日志打码成 `***`，要用 PTY 模式实时抓。
+> **Rule**: Hermes has 50+ skills. Loading one takes 2 seconds, saves 20 minutes.
 
 ---
 
-## 案例 5: 游戏开发 — Godot 项目迭代
+## 4. npm 2FA 死循环 / The npm 2FA Loop
 
-**用户请求**: "给我的 FPS 卡牌游戏加一个抽卡动画"
+**用户**: "帮我把这个包发到 npm"
 
-**❌ 过度设计**
+### ❌ Wrong (5 attempts, all fail)
 
-```
-1. 分析现有代码 → 花了 200 行写动画系统
-2. 引入 tween 库、状态机、事件总线
-3. 改了 15 个文件
-4. 测试时游戏崩溃
-```
-
-**✅ 外科手术式**
-
-```
-1. 搜索现有动画相关代码
-   → verify: 找到现有动画模式
-
-2. 在现有 Godot AnimationPlayer 上加新动画
-   → verify: 只改了 1 个 .tscn + 1 个 .gd
-
-3. 绑定触发逻辑
-   → verify: 手动跑一遍场景
-
-4. 不改任何无关代码
+```bash
+npm publish → EOTP error
+npm login --auth-type=web → timeout
+npm publish → EOTP error
+# ... loops forever
 ```
 
-**关键**: Godot 项目里，改动限制在场景文件和对应脚本。
+### ✅ Correct (one shot)
+
+```
+1. Start npm login in PTY mode
+2. Capture auth URL from output: https://www.npmjs.com/auth/cli/<uuid>
+3. Open in desktop browser: cmd.exe //c start "" "URL"
+4. User completes 2FA in Chrome authenticator extension
+5. Wait for flow to complete
+6. npm publish --access public → SUCCESS
+```
+
+> **Rule**: npm redacts auth URLs to `***` in logs. Use PTY mode to capture live output.
 
 ---
 
-## 案例 6: 中英混合协作
+## 5. 游戏开发外科手术 / Surgical Game Dev
 
-**用户是中国人，但某些输出需要英文**
+**用户**: "给我的 FPS 卡牌游戏加抽卡动画"
 
-**❌ 混乱**
+### ❌ Wrong (200 lines, 15 files)
 
-```
-用户: "帮我写个 README"
-Hermes: 写了英文 README
-用户: "我要中文的啊"
-Hermes: 全改中文
-用户: "但是代码示例还是英文好..."
-# 来回拉扯
+```gdscript
+# Creates: AnimationSystem, TweenManager, StateMachine, EventBus...
+# Modifies: 15 files including unrelated systems
+# Result: Game crashes, scope creep
 ```
 
-**✅ 明确指令**
+### ✅ Correct (1 scene + 1 script)
+
+```gdscript
+1. search_files("AnimationPlayer") → find existing pattern
+2. Add new animation to existing AnimationPlayer in .tscn
+3. Bind trigger in .gd script
+4. Test in scene
+# Files changed: 2. No unrelated code touched.
+```
+
+> **Rule**: In Godot projects, changes should be scene-scoped, not engine-wide.
+
+---
+
+## 6. 中英混合 / Language Drift
+
+**用户（中文）**: "帮我写个 README"
+
+### ❌ Wrong
 
 ```
-默认写中文，但:
-- 代码、API 名、命令保持原样
+Hermes writes in English → User: "要中文"
+Hermes rewrites in Chinese → But code is in Chinese too
+User: "代码部分用英文" → back and forth...
+```
+
+### ✅ Correct
+
+AGENTS.md 声明后，行为稳定：
+
+```markdown
+## 沟通 / Communication
+- 默认中文，用户用英文则回英文
+- 代码、API 名、命令保持原样不翻译
 - npm 包名、GitHub 项目名不翻译
-- 如果面向国际发布，另写 README.en.md
 ```
 
-**关键**: AGENTS.md 里写明语言偏好，不需要每次纠正。
+> **Rule**: Declare language preferences once in AGENTS.md. Never correct again.
 
 ---
 
-## 反模式速查
+## 反模式速查 / Anti-Patterns Quick Ref
 
-| 场景 | 反模式 | 正确做法 |
-|------|--------|---------|
+| 场景 / Scenario | ❌ 反模式 | ✅ 正确 |
+|-----------------|----------|---------|
 | 文件操作 | MSYS 路径 | Windows 原生路径 |
 | Python | `python3` / `pip` | `python` / `uv` |
 | 生图/设计 | 裸调工具 | 先加载技能 |
-| npm 发布 | 死循环重试 | PTY + 桌面浏览器 |
+| npm 发布 | 循环重试 | PTY + 桌面浏览器 |
 | 游戏开发 | 大范围改动 | 场景文件级修改 |
-| 代码审查 | 顺带重构 | 只动目标代码 |
-| 工具选择 | 凭记忆 | 查记忆 + 查技能 |
+| 代码修改 | 顺带重构 | 只动目标代码 |
+| 工具选择 | 凭记忆 | 查 skills + memory |
+| 任务完成 | 只给方案 | 实际运行验证 |
